@@ -1,104 +1,67 @@
 import telebot
+from openai import OpenAI
+from gtts import gTTS
+import os
+import uuid
 
-# Замените 'YOUR_API_TOKEN' на ваш токен от BotFather
-API_TOKEN = '7295302512:AAHQyKsMXXOe3J-7BUXjXNrBf5HdZiACwlQ'
-bot = telebot.TeleBot(API_TOKEN)
+# Инициализация клиента API OpenAI
+client = OpenAI(
+    api_key="sk-eojihWMYuwlwO4oNjNMX8DbkkkBtLg7I",
+    base_url="https://api.proxyapi.ru/openai/v1",
+)
 
+# Инициализация Telegram бота
+bot_token = '7295302512:AAHQyKsMXXOe3J-7BUXjXNrBf5HdZiACwlQ'  # Замените на токен вашего бота
+bot = telebot.TeleBot(bot_token)
 
-# Обработка команды /start
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message,
-                 "Добро пожаловать! Я ваш помощник-бот. Используйте команду /help для получения справочной информации.")
+# Словарь для хранения сообщений по чатам
+user_chats = {}
 
+def chat_with_ai(user_id, initial_message):
+    messages = user_chats.get(user_id, [])
+    messages.append({"role": "user", "content": initial_message})
 
-# Обработка команды /help
-@bot.message_handler(commands=['help'])
-def send_help(message):
-    help_text = (
-        "Доступные команды:\n"
-        "/start - Запустить бота\n"
-        "/help - Получить справочную информацию\n"
-        "/perevorot <ваш текст> - Перевернуть текст\n"
-        "/caps <ваш текст> - Преобразовать текст в заглавные буквы\n"
-        "/cut <ваш текст> - Удалить все гласные буквы из текста\n"
-        "/safe < логин > < пароль > - принимает логин и пароль, разделенные пробелом, и сохраняет их в хранилище\n"
-        "/getpass < логин > - позволяет получить соответствующий пароль по логину"
-
+    # Отправка запроса к нейросети
+    chat_completion = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages
     )
-    bot.reply_to(message, help_text)
 
+    # Получение ответа нейросети
+    response_message = chat_completion.choices[0].message.content
+    messages.append({"role": "assistant", "content": response_message})
+    user_chats[user_id] = messages
 
-# Обработка команды /perevorot
-@bot.message_handler(commands=['perevorot'])
-def reverse_text(message):
-    # Получаем текст после команды /perevorot
-    text_to_reverse = message.text[len('/perevorot '):].strip()
+    return response_message
 
-    if text_to_reverse:
-        reversed_text = text_to_reverse[::-1]  # Переворачиваем текст
-        bot.reply_to(message, reversed_text)
+def text_to_speech(text):
+    # Создание временного файла с аудио
+    temp_filename = f'temp_{uuid.uuid4()}.mp3'
+    tts = gTTS(text=text, lang='ru')  # Убедитесь, что установлен нужный язык
+    tts.save(temp_filename)
+    return temp_filename
+
+@bot.message_handler(func=lambda message: True)
+def echo_all(message):
+    user_id = message.from_user.id
+    user_message = message.text
+
+    response = chat_with_ai(user_id, user_message)
+
+    if user_message.lower().startswith("audio"):
+        # Преобразуем текст в речь
+        audio_file = text_to_speech(response)
+
+        # Отправляем голосовое сообщение пользователю
+        with open(audio_file, 'rb') as voice:
+            bot.send_voice(user_id, voice)
+
+        # Удаляем временный файл
+        os.remove(audio_file)
     else:
-        bot.reply_to(message, "Пожалуйста, введите текст для переворота после команды /perevorot.")
-
-
-# Обработка команды /caps
-@bot.message_handler(commands=['caps'])
-def caps_text(message):
-    # Получаем текст после команды /caps
-    text_to_caps = message.text[len('/caps '):].strip()
-
-    if text_to_caps:
-        caps_text = text_to_caps.upper()  # Преобразуем текст в заглавные буквы
-        bot.reply_to(message, caps_text)
-    else:
-        bot.reply_to(message, "Пожалуйста, введите текст для преобразования в заглавные буквы после команды /caps.")
-
-
-# Обработка команды /cut
-@bot.message_handler(commands=['cut'])
-def cut_vowels(message):
-    # Получаем текст после команды /cut
-    text_to_cut = message.text[len('/cut '):].strip()
-
-    if text_to_cut:
-        vowels = "аеёиоуыэюяАЕЁИОУЫЭЮЯaeiouAEIOU"
-        cut_text = ''.join([char for char in text_to_cut if char not in vowels])
-
-# Удаляем гласные
-        bot.reply_to(message, cut_text)
-    else:
-        bot.reply_to(message, "Пожалуйста, введите текст для удаления гласных после команды /cut.")
-
-# Хранилище для логинов и паролей
-user_credentials = {}
-
-# Обработка команды /safe
-@bot.message_handler(commands=['safe'])
-def save_credentials(message):
-    try:
-        # Получаем аргументы команды
-        _, username, password = message.text.split()
-        user_credentials[username] = password
-        bot.reply_to(message, f"Логин и пароль для '{username}' успешно сохранены.")
-    except ValueError:
-        bot.reply_to(message, "Ошибка: Пожалуйста, используйте формат: /safe <логин> <пароль>")
-
-# Обработка команды /getpass
-@bot.message_handler(commands=['getpass'])
-def get_password(message):
-    try:
-        # Получаем аргументы команды
-        _, username = message.text.split()
-        if username in user_credentials:
-            password = user_credentials[username]
-            bot.reply_to(message, f"Пароль для '{username}': {password}")
-        else:
-            bot.reply_to(message, f"Нет сохраненного пароля для логина '{username}'.")
-    except ValueError:
-        bot.reply_to(message, "Ошибка: Пожалуйста, используйте формат: /getpass <логин>")
+        # Отправляем текстовое сообщение
+        bot.reply_to(message, response)
 
 # Запуск бота
-if __name__ == '__main__':
-    print("Бот запущен...")
+if __name__ == "__main__":
     bot.polling(none_stop=True)
